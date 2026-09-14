@@ -1,0 +1,26 @@
+---
+- name: Provision an Arch or Arch-based workstation
+  hosts: local
+  gather_facts: true
+
+  pre_tasks:
+    - name: Refuse to run on a non-Arch distribution
+      ansible.builtin.assert:
+        that: ansible_facts.os_family == 'Archlinux'
+        fail_msg: >-
+          This playbook targets Arch and Arch-based distributions
+          (Arch, Manjaro, EndeavourOS, CachyOS). Detected os_family
+          '{{ ansible_facts.os_family }}' on
+          '{{ ansible_facts.distribution }}'.
+      tags: always
+
+  roles:
+    - { role: base, tags: [base] }
+    - { role: dotfiles, tags: [dotfiles] }
+    - { role: packages, tags: [packages] }
+    - { role: shell, tags: [shell] }
+    - { role: docker, tags: [docker] }
+    - { role: toolchains, tags: [toolchains, mise] }
+    # Compiles for 5-10 minutes. Excluded from the default run; opt in with
+    #   ansible-playbook site.yml --tags neovim
+    - { role: neovim, tags: [never, neovim] }

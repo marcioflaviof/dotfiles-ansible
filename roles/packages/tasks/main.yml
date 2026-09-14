@@ -1,0 +1,107 @@
+---
+- name: Install the Hyprland desktop
+  community.general.pacman:
+    name: "{{ packages_hyprland }}"
+    state: present
+  become: true
+  when: install_hyprland | bool
+  tags: [hyprland]
+
+- name: Install shells and terminals
+  community.general.pacman:
+    name: "{{ packages_shell }}"
+    state: present
+  become: true
+  tags: [cli]
+
+- name: Install command line tools
+  community.general.pacman:
+    name: "{{ packages_cli }}"
+    state: present
+  become: true
+  tags: [cli]
+
+- name: Install development tools
+  community.general.pacman:
+    name: "{{ packages_dev }}"
+    state: present
+  become: true
+  tags: [cli]
+
+- name: Install desktop utilities
+  community.general.pacman:
+    name: "{{ packages_desktop }}"
+    state: present
+  become: true
+  tags: [hyprland]
+
+- name: Install applications
+  community.general.pacman:
+    name: "{{ packages_apps }}"
+    state: present
+  become: true
+  tags: [apps]
+
+- name: Install fonts
+  community.general.pacman:
+    name: "{{ packages_fonts }}"
+    state: present
+  become: true
+  tags: [hyprland]
+
+# community.general.pacman cannot drive a helper for AUR packages: it resolves
+# the list with `yay --sync --print-format`, which yay hands to pacman, so every
+# AUR target comes back "target not found". Ask pacman what is installed once,
+# then hand yay only what is missing.
+- name: List the packages already installed  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: pacman -Qq
+  register: pacman_installed
+  changed_when: false
+  check_mode: false
+  tags: [hyprland, cli, apps]
+
+- name: Work out which AUR packages are missing
+  ansible.builtin.set_fact:
+    aur_missing_desktop: "{{ packages_aur_desktop | difference(pacman_installed.stdout_lines) }}"
+    aur_missing_cli: "{{ packages_aur_cli | difference(pacman_installed.stdout_lines) }}"
+    aur_missing_apps: "{{ packages_aur_apps | difference(pacman_installed.stdout_lines) }}"
+  tags: [hyprland, cli, apps]
+
+# yay refuses to run as root, hence become: false. It raises its own sudo
+# prompt for the final install, so an interactive terminal is required the
+# first time an AUR package is built.
+- name: Install the AUR desktop packages
+  ansible.builtin.command:
+    cmd: "yay -S --noconfirm --needed {{ aur_missing_desktop | join(' ') }}"
+  when:
+    - install_hyprland | bool
+    - aur_missing_desktop | length > 0
+  changed_when: true
+  become: false
+  tags: [hyprland]
+
+- name: Install the AUR command line tools
+  ansible.builtin.command:
+    cmd: "yay -S --noconfirm --needed {{ aur_missing_cli | join(' ') }}"
+  when: aur_missing_cli | length > 0
+  changed_when: true
+  become: false
+  tags: [cli]
+
+- name: Install the AUR applications
+  ansible.builtin.command:
+    cmd: "yay -S --noconfirm --needed {{ aur_missing_apps | join(' ') }}"
+  when: aur_missing_apps | length > 0
+  changed_when: true
+  become: false
+  tags: [apps]
+
+# command tasks skip themselves in check mode, so say what they would have done.
+- name: Report the AUR packages a real run would install
+  ansible.builtin.debug:
+    msg: >-
+      Would install via yay:
+      {{ (aur_missing_desktop + aur_missing_cli + aur_missing_apps) | join(', ') or 'nothing, all present' }}
+  when: ansible_check_mode
+  tags: [hyprland, cli, apps]

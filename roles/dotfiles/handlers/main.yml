@@ -1,0 +1,7 @@
+---
+- name: Reload hyprland
+  ansible.builtin.command: hyprctl reload
+  changed_when: true
+  failed_when: false
+  # No-op when hyprland is not running, e.g. a headless or container run.
+  when: ansible_facts.env.HYPRLAND_INSTANCE_SIGNATURE is defined

@@ -1,0 +1,23 @@
+---
+- name: Enable and start the docker daemon
+  ansible.builtin.systemd_service:
+    name: docker.service
+    enabled: true
+    state: started
+  become: true
+
+# The docker package already creates the group; no groupadd needed.
+- name: Add the user to the docker group
+  ansible.builtin.user:
+    name: "{{ ansible_facts.user_id }}"
+    groups: docker
+    append: true
+  become: true
+  register: docker_group
+
+- name: Point out that the group change needs a new session
+  ansible.builtin.debug:
+    msg: >-
+      {{ ansible_facts.user_id }} was added to the docker group. Log out and back in
+      (or run `newgrp docker`) before using docker without sudo.
+  when: docker_group.changed

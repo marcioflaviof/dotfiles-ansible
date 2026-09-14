@@ -1,0 +1,75 @@
+---
+# runs/neovim rebuilds unconditionally on every invocation, which costs 5-10
+# minutes even when nothing changed. The "stable" tag is a moving pointer, so
+# the installed version string cannot be compared against it directly. Instead
+# the commit that was last built is recorded in a stamp file and compared
+# against what stable points at now.
+- name: Check whether neovim is installed
+  ansible.builtin.command: nvim --version
+  register: nvim_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Resolve the upstream commit for {{ neovim_version }}  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: "git ls-remote {{ neovim_repo }} {{ neovim_version }}"
+  register: nvim_remote
+  changed_when: false
+  check_mode: false
+
+- name: Read the stamp from the last build
+  ansible.builtin.slurp:
+    src: "{{ neovim_stamp_file }}"
+  register: nvim_stamp
+  failed_when: false
+  check_mode: false
+
+- name: Work out whether a build is needed
+  ansible.builtin.set_fact:
+    nvim_wanted_sha: "{{ (nvim_remote.stdout | default('')).split() | first | default('') }}"
+    nvim_built_sha: "{{ (nvim_stamp.content | default('') | b64decode | trim) if nvim_stamp.content is defined else '' }}"
+
+- name: Build neovim from source
+  when: >-
+    nvim_installed.rc != 0
+    or nvim_built_sha != nvim_wanted_sha
+    or neovim_force_rebuild | default(false)
+  block:
+    - name: Clone the neovim source at {{ neovim_version }}
+      ansible.builtin.git:
+        repo: "{{ neovim_repo }}"
+        dest: "{{ neovim_src_path }}"
+        version: "{{ neovim_version }}"
+        force: true
+
+    - name: Compile neovim
+      community.general.make:
+        chdir: "{{ neovim_src_path }}"
+        params:
+          CMAKE_BUILD_TYPE: RelWithDebInfo
+
+    - name: Install neovim to /usr/local
+      community.general.make:
+        chdir: "{{ neovim_src_path }}"
+        target: install
+      become: true
+
+    - name: Make sure the state directory exists
+      ansible.builtin.file:
+        path: "{{ neovim_stamp_file | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Record the commit that was built
+      ansible.builtin.copy:
+        content: "{{ nvim_wanted_sha }}\n"
+        dest: "{{ neovim_stamp_file }}"
+        mode: "0644"
+
+- name: Report the neovim state
+  ansible.builtin.debug:
+    msg: >-
+      {{ nvim_installed.stdout_lines[0] | default('neovim not installed') }};
+      built from {{ nvim_built_sha | default('', true) | truncate(9, true, '') or 'unknown' }},
+      {{ neovim_version }} is now {{ nvim_wanted_sha | truncate(9, true, '') }}

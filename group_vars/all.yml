@@ -1,0 +1,175 @@
+---
+# ---------------------------------------------------------------------------
+# Dotfiles repository
+# ---------------------------------------------------------------------------
+# Cloned over HTTPS so a fresh machine needs no SSH key, then the origin remote
+# is rewritten to SSH so pushes still use your keys.
+dotfiles_repo_url: "https://github.com/marcioflaviof/.dotfiles.git"
+dotfiles_repo_ssh_url: "git@github.com:marcioflaviof/.dotfiles.git"
+dotfiles_repo_path: "{{ ansible_facts.env.HOME }}/dev"
+dotfiles_repo_branch: master
+
+# src is relative to dotfiles_repo_path, dest is relative to $HOME.
+# Anything already at dest that is not the correct symlink is moved aside to
+# <dest>.bak-<timestamp> before the link is created. Nothing is ever deleted.
+dotfile_links:
+  - { src: ".config/fish", dest: ".config/fish" }
+  - { src: ".config/nvim", dest: ".config/nvim" }
+  - { src: ".config/hypr", dest: ".config/hypr" }
+  - { src: ".config/waybar", dest: ".config/waybar" }
+  - { src: ".config/ghostty", dest: ".config/ghostty" }
+  - { src: ".config/zellij", dest: ".config/zellij" }
+  - { src: ".local/scripts", dest: ".local/scripts" }
+  - { src: ".tmux.conf", dest: ".tmux.conf" }
+  - { src: ".gitconfig", dest: ".gitconfig" }
+
+# ---------------------------------------------------------------------------
+# Desktop
+# ---------------------------------------------------------------------------
+# Off by default: most machines this runs on already have a desktop, so the
+# compositor, waybar, hyprpaper and the walker launcher are left alone unless
+# asked for. Opt in on a fresh install:
+#
+#   ansible-playbook site.yml -e install_hyprland=true
+#
+# Everything else runs either way: desktop utilities, fonts, the dotfile links
+# and the shell, docker and toolchain roles. Per machine, set it in
+# host_vars/<hostname>.yml instead of passing -e on every run.
+install_hyprland: false
+
+# ---------------------------------------------------------------------------
+# Packages from the official repositories
+# ---------------------------------------------------------------------------
+packages_hyprland:
+  - hyprland
+  - waybar
+  - hyprpaper
+  - swaync
+  - hyprlock
+  - hyprpolkitagent
+  - grim
+  - slurp
+  # xdg-desktop-portal is a hard dependency of the -hyprland backend, so it is
+  # not listed: pacman pulls it in. pipewire is also pulled in by the backend
+  # but stays explicit, since the audio stack is wanted on its own account.
+  - xdg-desktop-portal-hyprland
+  - pipewire
+  - wireplumber
+
+packages_shell:
+  - fish
+  - starship
+  - ghostty
+  # tmux and zellij are multiplexers, not terminals; ghostty is the only
+  # terminal emulator installed.
+  - tmux
+  - zellij
+
+packages_cli:
+  - ripgrep
+  - fd
+  - bat
+  - eza
+  - fzf
+  - jq
+  - zoxide
+  - direnv
+  - wget
+  - unzip
+  - less
+  - tldr
+  - btop
+  - xclip
+  - wl-clipboard
+  - zk
+
+packages_dev:
+  - base-devel
+  - cmake
+  - ninja
+  - curl
+  - docker
+  - docker-compose
+  - docker-buildx
+  - github-cli
+  - lazydocker
+  - postgresql-libs
+
+packages_desktop:
+  - pavucontrol
+  - bluez-utils
+  - upower
+  - flameshot
+
+packages_apps:
+  - discord
+  - telegram-desktop
+  - thunderbird
+
+packages_fonts:
+  - ttf-jetbrains-mono
+  - noto-fonts-emoji
+
+# ---------------------------------------------------------------------------
+# Packages from the AUR
+# ---------------------------------------------------------------------------
+# Walker is the launcher, in rofi's place, so it belongs to the desktop rather
+# than to the applications: `--tags hyprland` has to leave you with a way to
+# launch things. Each of its data providers ships as its own elephant package.
+packages_aur_desktop:
+  - walker
+  - elephant-desktopapplications
+  - elephant-calc
+  - elephant-clipboard
+  - elephant-files
+  - elephant-menus
+  - elephant-providerlist
+  - elephant-runner
+  - elephant-symbols
+  - elephant-websearch
+
+# opencode-bin rather than opencode: the -bin package is what is installed on
+# the current machine and it skips a long Go build.
+packages_aur_cli:
+  - opencode-bin
+
+packages_aur_apps:
+  - spotify
+  - slack-desktop
+  - google-chrome
+  - wlogout
+
+# ---------------------------------------------------------------------------
+# Shell
+# ---------------------------------------------------------------------------
+login_shell: /usr/bin/fish
+tpm_repo: "https://github.com/tmux-plugins/tpm.git"
+tpm_path: "{{ ansible_facts.env.HOME }}/.tmux/plugins/tpm"
+
+# ---------------------------------------------------------------------------
+# Toolchains
+# ---------------------------------------------------------------------------
+# config.fish activates mise from ~/.local/bin, which is where the upstream
+# installer puts it. Keep that path rather than the packaged /usr/bin/mise.
+mise_bin: "{{ ansible_facts.env.HOME }}/.local/bin/mise"
+# Claude Code is installed with the upstream installer rather than the AUR
+# claude-code package, matching what is already on this machine: it lands in
+# ~/.local/bin and self-updates, so it never waits on an AUR rebuild.
+claude_installer_url: "https://claude.ai/install.sh"
+claude_bin: "{{ ansible_facts.env.HOME }}/.local/bin/claude"
+
+mise_global_tools:
+  - node
+  - ruby
+  - python
+  - rust
+
+# ---------------------------------------------------------------------------
+# Neovim (built from source, opt in with --tags neovim)
+# ---------------------------------------------------------------------------
+neovim_repo: "https://github.com/neovim/neovim.git"
+neovim_version: stable
+neovim_src_path: "{{ ansible_facts.env.HOME }}/personal/neovim"
+# Records the commit the installed binary was built from, so a re-run can
+# tell whether the moving "stable" tag has advanced since.
+neovim_stamp_file: "{{ ansible_facts.env.HOME }}/.local/state/dotfiles-ansible/neovim.sha"

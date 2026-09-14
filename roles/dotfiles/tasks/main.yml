@@ -1,0 +1,107 @@
+---
+# update: false means an existing checkout is never fetched, reset or touched.
+# Important on a machine where the repo already has uncommitted work on a
+# feature branch.
+- name: Clone the dotfiles repository
+  ansible.builtin.git:
+    repo: "{{ dotfiles_repo_url }}"
+    dest: "{{ dotfiles_repo_path }}"
+    version: "{{ dotfiles_repo_branch }}"
+    update: false
+  register: dotfiles_clone
+
+- name: Point the origin remote at SSH so pushes use your keys  # noqa command-instead-of-module
+  ansible.builtin.command:
+    cmd: "git -C {{ dotfiles_repo_path }} remote set-url origin {{ dotfiles_repo_ssh_url }}"
+  when: dotfiles_clone.changed
+  changed_when: true
+
+# Only for links nested below $HOME. Top level dotfiles such as .tmux.conf
+# would otherwise make this task touch $HOME itself.
+# No mode is set on purpose: these parents (~/.config, ~/.local) usually
+# already exist and their permissions are not this playbook's business.
+- name: Make sure the parent directory of every nested link exists  # noqa risky-file-permissions
+  ansible.builtin.file:
+    path: "{{ (ansible_facts.env.HOME ~ '/' ~ item.dest) | dirname }}"
+    state: directory
+  loop: "{{ dotfile_links }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  when: "'/' in item.dest"
+
+- name: Inspect the current state of each link target
+  ansible.builtin.stat:
+    path: "{{ ansible_facts.env.HOME }}/{{ item.dest }}"
+    follow: false
+  loop: "{{ dotfile_links }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: link_targets
+
+# Each entry gains a needs_backup flag: something is at the target and it is
+# not already the symlink we want.
+- name: Build the link plan
+  ansible.builtin.set_fact:
+    dotfile_plan: "{{ dotfile_plan | default([]) + [item | combine({'needs_backup': needs_backup})] }}"
+  loop: "{{ link_targets.results }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  vars:
+    wanted: "{{ dotfiles_repo_path }}/{{ item.item.src }}"
+    needs_backup: >-
+      {{ item.stat.exists and not (item.stat.islnk | default(false) and item.stat.lnk_target | default('') == wanted) }}
+
+# Anything in the way that is not already the correct symlink is moved aside,
+# never deleted. Diff the resulting .bak-* afterwards to recover local edits.
+- name: Back up anything already occupying a link target
+  ansible.builtin.command:
+    cmd: >-
+      mv {{ ansible_facts.env.HOME }}/{{ item.item.dest }}
+         {{ ansible_facts.env.HOME }}/{{ item.item.dest }}.bak-{{ ansible_facts.date_time.iso8601_basic_short }}
+  loop: "{{ dotfile_plan }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  when: item.needs_backup | bool
+  changed_when: true
+
+# The file module refuses to replace a non-empty directory even with force, so
+# the backup above has to have run first. Under --check the backup is not
+# actually performed, so those entries are skipped and reported instead.
+- name: Link each dotfile into the repository checkout
+  ansible.builtin.file:
+    src: "{{ dotfiles_repo_path }}/{{ item.item.src }}"
+    dest: "{{ ansible_facts.env.HOME }}/{{ item.item.dest }}"
+    state: link
+    force: true
+  loop: "{{ dotfile_plan }}"
+  loop_control:
+    label: "{{ item.item.dest }} -> {{ item.item.src }}"
+  when: not (ansible_check_mode and item.needs_backup | bool)
+  notify: Reload hyprland
+
+- name: Report what a real run would move aside
+  ansible.builtin.debug:
+    msg: >-
+      Would back up then link:
+      {{ dotfile_plan | selectattr('needs_backup') | map(attribute='item.dest') | list }}
+  when:
+    - ansible_check_mode
+    - dotfile_plan | selectattr('needs_backup') | list | length > 0
+
+- name: Find the backups that exist
+  ansible.builtin.find:
+    paths:
+      - "{{ ansible_facts.env.HOME }}/.config"
+      - "{{ ansible_facts.env.HOME }}"
+    patterns: "*.bak-*"
+    file_type: any
+    recurse: false
+  register: dotfiles_backups
+
+- name: Show where to look for displaced configuration
+  ansible.builtin.debug:
+    msg: >-
+      {{ dotfiles_backups.files | length }} backup(s) present. Diff them
+      against the repository before deleting:
+      {{ dotfiles_backups.files | map(attribute='path') | list }}
+  when: dotfiles_backups.files | length > 0

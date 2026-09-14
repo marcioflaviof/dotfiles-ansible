@@ -1,0 +1,6 @@
+---
+# Role-prefixed variable names would make every register and set_fact in this
+# repo considerably noisier for no benefit at this size.
+skip_list:
+  - var-naming[no-role-prefix]
+  - no-handler

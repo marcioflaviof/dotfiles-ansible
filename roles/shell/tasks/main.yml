@@ -1,0 +1,35 @@
+---
+- name: Make fish the login shell
+  ansible.builtin.user:
+    name: "{{ ansible_facts.user_id }}"
+    shell: "{{ login_shell }}"
+  become: true
+
+- name: Clone the tmux plugin manager
+  ansible.builtin.git:
+    repo: "{{ tpm_repo }}"
+    dest: "{{ tpm_path }}"
+    version: master
+    update: false
+
+# fisher.fish is committed in the dotfiles repo, so on a linked machine this is
+# already in place. force: false means the tracked copy is never overwritten,
+# which would otherwise show up as an unwanted diff in the dotfiles repo.
+# Skipped in check mode: ~/.config/fish is a symlink the dotfiles role only
+# creates for real, so on a dry run the destination directory is not there yet.
+- name: Install fisher
+  when: not ansible_check_mode
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish
+    dest: "{{ ansible_facts.env.HOME }}/.config/fish/functions/fisher.fish"
+    mode: "0644"
+    force: false
+
+# fisher is a fish function, so it has to be invoked through fish itself. It
+# reads .config/fish/fish_plugins and installs whatever is listed there.
+- name: Install the plugins listed in fish_plugins
+  ansible.builtin.command:
+    cmd: "{{ login_shell }} -c 'fisher update'"
+  register: fisher_update
+  changed_when: "'Installing' in fisher_update.stdout or 'Updating' in fisher_update.stdout"
+  failed_when: false

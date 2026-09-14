@@ -1,0 +1,92 @@
+---
+- name: Synchronise the package databases and upgrade the system
+  community.general.pacman:
+    update_cache: true
+    upgrade: true
+  become: true
+
+- name: Install the toolchain needed to build AUR packages
+  community.general.pacman:
+    name:
+      - base-devel
+      - git
+      - go
+    state: present
+  become: true
+
+# check_mode: false so a --check run still probes and reports accurately,
+# rather than skipping and concluding no helper is present.
+- name: Look for an existing AUR helper
+  ansible.builtin.command: "which {{ item }}"
+  register: aur_helper_probe
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop:
+    - yay
+    - paru
+
+- name: Record whether an AUR helper is already installed
+  ansible.builtin.set_fact:
+    aur_helper_present: "{{ aur_helper_probe.results | selectattr('rc', 'equalto', 0) | list | length > 0 }}"
+
+# Manjaro and EndeavourOS ship yay, so this whole block is skipped there. On a
+# plain Arch install it is the step that makes everything downstream possible.
+# check mode cannot build a package: ansible.builtin.tempfile skips, so
+# yay_build_dir has no .path and everything below it fails to template. Report
+# the intent instead and move on.
+- name: Report that a real run would bootstrap yay
+  ansible.builtin.debug:
+    msg: >-
+      No AUR helper found. A real run would build yay-bin from the AUR here.
+  when:
+    - not aur_helper_present
+    - ansible_check_mode
+
+- name: Bootstrap yay from the AUR
+  when:
+    - not aur_helper_present
+    - not ansible_check_mode
+  block:
+    - name: Create a build directory for yay
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: yay-bin
+      register: yay_build_dir
+
+    - name: Clone the yay-bin PKGBUILD
+      ansible.builtin.git:
+        repo: https://aur.archlinux.org/yay-bin.git
+        dest: "{{ yay_build_dir.path }}/yay-bin"
+        version: master
+        depth: 1
+
+    # makepkg refuses to run as root, so the build must not become. It is
+    # split from the install so makepkg never has to raise its own sudo
+    # prompt, which Ansible could not answer.
+    - name: Build the yay package
+      ansible.builtin.command:
+        cmd: makepkg --syncdeps --noconfirm --needed
+        chdir: "{{ yay_build_dir.path }}/yay-bin"
+      become: false
+      changed_when: true
+
+    - name: Find the package makepkg produced
+      ansible.builtin.find:
+        paths: "{{ yay_build_dir.path }}/yay-bin"
+        patterns: "yay-bin-*.pkg.tar.*"
+      register: yay_package
+
+    - name: Install yay
+      community.general.pacman:
+        name: "{{ yay_package.files | map(attribute='path') | list }}"
+        state: present
+        extra_args: --noconfirm
+      become: true
+
+  always:
+    - name: Remove the yay build directory
+      ansible.builtin.file:
+        path: "{{ yay_build_dir.path }}"
+        state: absent
+      when: yay_build_dir.path is defined

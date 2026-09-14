@@ -1,0 +1,26 @@
+---
+# config.fish activates mise from ~/.local/bin, which is where the upstream
+# installer puts it. The packaged mise would land in /usr/bin and that line
+# would break, so the installer is used rather than pacman.
+- name: Install mise
+  ansible.builtin.shell:
+    cmd: set -o pipefail && curl -sSf https://mise.run | sh
+    executable: /bin/bash
+    creates: "{{ mise_bin }}"
+
+- name: Install the global toolchains
+  ansible.builtin.command:
+    cmd: "{{ mise_bin }} use --global {{ item }}"
+  loop: "{{ mise_global_tools }}"
+  register: mise_use
+  changed_when: "'installed' in (mise_use.stderr | default('') | lower)"
+
+# Claude Code ships its own installer, which puts the binary in ~/.local/bin
+# and updates itself from there. The AUR claude-code package would instead pin
+# it to whatever yay last rebuilt.
+- name: Install Claude Code
+  ansible.builtin.shell:
+    cmd: set -o pipefail && curl -fsSL {{ claude_installer_url }} | bash
+    executable: /bin/bash
+    creates: "{{ claude_bin }}"
+  tags: [claude]
