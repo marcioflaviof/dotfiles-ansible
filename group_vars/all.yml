@@ -71,7 +71,6 @@ packages_cli:
   - bat
   - eza
   - fzf
-  - jq
   - zoxide
   - direnv
   - wget

@@ -13,7 +13,10 @@
     cmd: "{{ mise_bin }} use --global {{ item }}"
   loop: "{{ mise_global_tools }}"
   register: mise_use
-  changed_when: "'installed' in (mise_use.stderr | default('') | lower)"
+  # mise prints a summary line either way: "installed 1 tool" on a real install,
+  # "installed 0 tools · 1 already installed" when there was nothing to do. Match
+  # only a non-zero count, or every re-run reports a change.
+  changed_when: mise_use.stderr | default('') is search('installed [1-9]')
 
 # Claude Code ships its own installer, which puts the binary in ~/.local/bin
 # and updates itself from there. The AUR claude-code package would instead pin

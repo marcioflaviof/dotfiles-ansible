@@ -27,9 +27,33 @@
 
 # fisher is a fish function, so it has to be invoked through fish itself. It
 # reads .config/fish/fish_plugins and installs whatever is listed there.
+#
+# `fisher update` re-fetches and rewrites every plugin on each invocation, and
+# ~/.config/fish is a symlink into the dotfiles checkout, so running it
+# unconditionally would leave that repo dirty after every run. Compare what is
+# asked for against what fisher already has, and only run when something is
+# actually missing.
+- name: Read the plugins fisher has installed
+  ansible.builtin.command:
+    cmd: "{{ login_shell }} -c 'fisher list'"
+  register: fisher_list
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the plugin list fish_plugins asks for
+  ansible.builtin.slurp:
+    src: "{{ ansible_facts.env.HOME }}/.config/fish/fish_plugins"
+  register: fish_plugins_file
+  failed_when: false
+  check_mode: false
+
 - name: Install the plugins listed in fish_plugins
   ansible.builtin.command:
     cmd: "{{ login_shell }} -c 'fisher update'"
-  register: fisher_update
-  changed_when: "'Installing' in fisher_update.stdout or 'Updating' in fisher_update.stdout"
+  vars:
+    wanted: "{{ (fish_plugins_file.content | default('') | b64decode).split() }}"
+    installed: "{{ fisher_list.stdout_lines | default([]) }}"
+  when: wanted | difference(installed) | length > 0
+  changed_when: true
   failed_when: false

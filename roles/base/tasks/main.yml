@@ -1,7 +1,16 @@
 ---
-- name: Synchronise the package databases and upgrade the system
+# Split from the upgrade on purpose. The module counts a refreshed package
+# database as a change, so the combined task reports "changed" on every run
+# where a mirror has moved on, even when there is nothing to upgrade. Pulling a
+# new db is not a change to this machine; installing packages is.
+- name: Synchronise the package databases
   community.general.pacman:
     update_cache: true
+  become: true
+  changed_when: false
+
+- name: Upgrade the system
+  community.general.pacman:
     upgrade: true
   become: true
 
